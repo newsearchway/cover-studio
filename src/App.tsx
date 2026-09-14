@@ -156,7 +156,11 @@ export default function App() {
   }, [img, ratioKey])
 
   const loadFile = (file: File | undefined) => {
-    if (!file || !file.type.startsWith('image/')) return
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      window.alert('请选择图片文件')
+      return
+    }
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
     const url = URL.createObjectURL(file)
     objectUrlRef.current = url
@@ -164,6 +168,9 @@ export default function App() {
     image.onload = () => {
       setImg(image)
       setImgName(file.name)
+    }
+    image.onerror = () => {
+      window.alert(`图片加载失败：${file.name}`)
     }
     image.src = url
   }

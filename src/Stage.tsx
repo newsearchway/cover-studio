@@ -174,17 +174,19 @@ export default function Stage(props: StageProps) {
             </button>
           )}
 
-          {/* 上方 1/2：半透明渐变标题区，底部渐隐融入图片 */}
-          <div
-            className="stage-gradient"
-            style={{
-              height: splitY,
-              opacity: gradient.opacity / 100,
-              background: `linear-gradient(${gradient.angle}deg, ${gradient.from}, ${gradient.to})`,
-              WebkitMaskImage: 'linear-gradient(to bottom, #000 60%, transparent 100%)',
-              maskImage: 'linear-gradient(to bottom, #000 60%, transparent 100%)',
-            }}
-          />
+          {/* 上方 1/2：半透明渐变标题区，底部渐隐融入图片（仅导入图片后显示） */}
+          {img && (
+            <div
+              className="stage-gradient"
+              style={{
+                height: splitY,
+                opacity: gradient.opacity / 100,
+                background: `linear-gradient(${gradient.angle}deg, ${gradient.from}, ${gradient.to})`,
+                WebkitMaskImage: 'linear-gradient(to bottom, #000 60%, transparent 100%)',
+                maskImage: 'linear-gradient(to bottom, #000 60%, transparent 100%)',
+              }}
+            />
+          )}
 
           {/* 文字图层 */}
           {layers.map((layer) =>
