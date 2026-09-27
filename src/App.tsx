@@ -606,6 +606,7 @@ export default function App() {
                   rows={2}
                   value={selected.text}
                   placeholder="输入文字，回车可换行（也可双击画布上的文字直接编辑）"
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => patchLayer(selected.id, { text: e.target.value })}
                 />
 

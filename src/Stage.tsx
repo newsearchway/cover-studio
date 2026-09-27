@@ -279,6 +279,11 @@ function LayerView({
   const [draft, setDraft] = useState(layer.text)
   // 拖拽缩放手柄状态：向右/向下拖增大字号
   const resizing = useRef<{ startX: number; startY: number; startSize: number } | null>(null)
+  // 行内编辑器：进入编辑时自动全选，便于直接输入替换（默认文字会被覆盖）
+  const editRef = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    if (editing) editRef.current?.select()
+  }, [editing])
   const onResizeDown = (e: React.PointerEvent) => {
     e.stopPropagation()
     try {
@@ -341,7 +346,7 @@ function LayerView({
     touchAction: 'none',
     outline: selected ? '2px dashed #6366f1' : 'none',
     outlineOffset: 4,
-    zIndex: selected ? 1000 + order : order,
+    zIndex: order,
   }
 
   // —— 双击行内编辑：覆盖在文字位置的多行编辑器 ——
@@ -362,10 +367,12 @@ function LayerView({
         }}
       >
         <textarea
+          ref={editRef}
           autoFocus
           value={draft}
           rows={Math.max(1, draft.split('\n').length)}
           onChange={(e) => setDraft(e.target.value)}
+          onFocus={(e) => e.target.select()}
           onPointerDown={(e) => e.stopPropagation()}
           onBlur={commit}
           onKeyDown={(e) => {
@@ -635,7 +642,7 @@ function ShapeView({
         touchAction: 'none',
         outline: selected ? '2px dashed #6366f1' : 'none',
         outlineOffset: 4,
-        zIndex: selected ? 1000 + order : order,
+        zIndex: order,
       }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -682,7 +689,7 @@ function ImageView({
         touchAction: 'none',
         outline: selected ? '2px dashed #6366f1' : 'none',
         outlineOffset: 4,
-        zIndex: selected ? 1000 + order : order,
+        zIndex: order,
       }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

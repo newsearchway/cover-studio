@@ -163,19 +163,19 @@ function roundRectPath(x: number, y: number, w: number, h: number, r: number): P
   ]
 }
 
-/** 箭头（朝右）：杆 + 三角箭头帽，在 w×h 盒内居中 */
+/** 箭头（朝上）：杆 + 三角箭头帽，在 w×h 盒内居中；旋转可调到任意方向 */
 function arrowPath(w: number, h: number): PathCmd[] {
-  const shaftR = h * 0.16 // 杆半高
-  const headX = w * 0.62 // 箭头帽起点
-  const cy = h / 2
+  const cx = w / 2
+  const shaftHalf = w * 0.16 // 杆半宽
+  const headY = h * 0.36 // 箭头帽与杆的分界
   return [
-    { t: 'M', x: 0, y: cy - shaftR },
-    { t: 'L', x: headX, y: cy - shaftR },
-    { t: 'L', x: headX, y: 0 },
-    { t: 'L', x: w, y: cy },
-    { t: 'L', x: headX, y: h },
-    { t: 'L', x: headX, y: cy + shaftR },
-    { t: 'L', x: 0, y: cy + shaftR },
+    { t: 'M', x: cx, y: 0 },
+    { t: 'L', x: w, y: headY },
+    { t: 'L', x: cx + shaftHalf, y: headY },
+    { t: 'L', x: cx + shaftHalf, y: h },
+    { t: 'L', x: cx - shaftHalf, y: h },
+    { t: 'L', x: cx - shaftHalf, y: headY },
+    { t: 'L', x: 0, y: headY },
     { t: 'Z' },
   ]
 }
