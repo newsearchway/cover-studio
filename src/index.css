@@ -702,3 +702,76 @@ input[type='range'] {
   font-size: 11px;
   color: #6b6f85;
 }
+
+/* ---------- 图形 / 元素 ---------- */
+.shape-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.shape-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0;
+  background: #20232c;
+  border: 1px solid #2e323f;
+  border-radius: 8px;
+  color: #c9cbda;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.shape-btn:hover {
+  background: #2a2d45;
+  border-color: #6366f1;
+}
+
+.shape-icon {
+  font-size: 18px;
+  line-height: 1;
+  color: #8b8fa6;
+}
+
+.shape-label {
+  font-size: 10px;
+  color: #8b8fa6;
+}
+
+/* 图层列表中的类型标记 */
+.layer-kind {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: #2e323f;
+  font-size: 11px;
+  font-weight: 700;
+  color: #a5a9bd;
+  flex-shrink: 0;
+}
+
+/* 8 向缩放手柄 */
+.rz-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #6366f1;
+  border: 2px solid #fff;
+  border-radius: 2px;
+  z-index: 30;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  box-sizing: border-box;
+}
+
+/* 行内文字编辑器 */
+.inline-editor textarea {
+  box-sizing: border-box;
+}
+

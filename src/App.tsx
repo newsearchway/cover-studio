@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Stage from './Stage'
 import { centerTransform, MAX_SCALE, MIN_SCALE, RATIO_SIZE, SPLIT, zoomAt } from './cover'
 import { downloadCover, renderCover } from './exportCover'
+import { createDefaultImageLayer, createDefaultShape, SHAPE_META, SHAPE_ORDER } from './shape'
 import {
   createDefaultLayer,
   detectFonts,
@@ -11,7 +12,17 @@ import {
   newLayerId,
   restoreImportedFonts,
 } from './textLayer'
-import type { GradientCfg, ImgTransform, RatioKey, TextLayer, TextLayout } from './types'
+import type {
+  CanvasLayer,
+  GradientCfg,
+  ImageLayer,
+  ImgTransform,
+  RatioKey,
+  ShapeKind,
+  ShapeLayer,
+  TextLayer,
+  TextLayout,
+} from './types'
 
 const RATIO_KEYS: RatioKey[] = ['3:4', '9:16', '4:3']
 
@@ -36,7 +47,7 @@ interface CoverTemplate {
   name: string
   ratioKey: RatioKey
   gradient: GradientCfg
-  layers: TextLayer[]
+  layers: CanvasLayer[]
   savedAt: number
 }
 
@@ -76,7 +87,7 @@ export default function App() {
   })
 
   const firstLayer = createDefaultLayer()
-  const [layers, setLayers] = useState<TextLayer[]>([firstLayer])
+  const [layers, setLayers] = useState<CanvasLayer[]>([firstLayer])
   const [selectedId, setSelectedId] = useState<string | null>(firstLayer.id)
   const [fontList, setFontList] = useState<string[]>([])
   const [fontLoading, setFontLoading] = useState(false)
@@ -85,7 +96,10 @@ export default function App() {
 
   const fileRef = useRef<HTMLInputElement>(null)
   const fontFileRef = useRef<HTMLInputElement>(null)
+  const shapeImgRef = useRef<HTMLInputElement>(null)
   const objectUrlRef = useRef<string | null>(null)
+  // 图形/图片元素的 object URL 引用（清理画板时一并回收）
+  const layerUrlsRef = useRef<string[]>([])
 
   const { w: W, h: H } = RATIO_SIZE[ratioKey]
 
@@ -131,8 +145,8 @@ export default function App() {
 
   const selected = layers.find((l) => l.id === selectedId) ?? layers[0] ?? null
 
-  const patchLayer = (id: string, patch: Partial<TextLayer>) =>
-    setLayers((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+  const patchLayer = (id: string, patch: Partial<CanvasLayer>) =>
+    setLayers((ls) => ls.map((l) => (l.id === id ? ({ ...l, ...patch } as CanvasLayer) : l)))
 
   const addLayer = () => {
     const nl = createDefaultLayer({ text: '新文字', y: 0.7 })
@@ -144,10 +158,41 @@ export default function App() {
     setLayers((ls) => {
       // 至少保留一个图层，避免编辑区消失
       if (ls.length <= 1) return ls
+      const target = ls.find((l) => l.id === id)
+      if (target?.kind === 'image') {
+        URL.revokeObjectURL(target.src)
+        layerUrlsRef.current = layerUrlsRef.current.filter((u) => u !== target.src)
+      }
       const next = ls.filter((l) => l.id !== id)
       if (selectedId === id) setSelectedId(next[0]?.id ?? null)
       return next
     })
+  }
+
+  // 新增图形元素
+  const addShape = (shape: ShapeKind) => {
+    const nl = createDefaultShape(shape)
+    setLayers((ls) => [...ls, nl])
+    setSelectedId(nl.id)
+  }
+
+  // 导入本地图片作为独立元素图层
+  const onLayerImageImport = (file?: File) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      window.alert('请选择图片文件')
+      return
+    }
+    const url = URL.createObjectURL(file)
+    layerUrlsRef.current.push(url)
+    const image = new Image()
+    image.onload = () => {
+      const nl = createDefaultImageLayer(url, image.naturalWidth, image.naturalHeight)
+      setLayers((ls) => [...ls, nl])
+      setSelectedId(nl.id)
+    }
+    image.onerror = () => window.alert(`图片加载失败：${file.name}`)
+    image.src = url
   }
 
   useEffect(() => {
@@ -181,13 +226,32 @@ export default function App() {
     setTf(zoomAt(img, W, H, tf, factor, W / 2, (H * SPLIT + H) / 2))
   }
 
-  const onExport = () => {
+  const onExport = async () => {
     if (!img) return
-    const canvas = renderCover({ W, H, img, tf, gradient, layers })
+    // 预加载图片元素图层，确保导出时已解码
+    const imageCache = new Map<string, HTMLImageElement>()
+    await Promise.all(
+      layers
+        .filter((l): l is ImageLayer => l.kind === 'image')
+        .map(
+          (l) =>
+            new Promise<void>((resolve) => {
+              const im = new Image()
+              im.crossOrigin = 'anonymous'
+              im.onload = () => {
+                imageCache.set(l.src, im)
+                resolve()
+              }
+              im.onerror = () => resolve()
+              im.src = l.src
+            }),
+        ),
+    )
+    const canvas = renderCover({ W, H, img, tf, gradient, layers, images: imageCache })
     downloadCover(canvas, `cover-${ratioKey.replace(':', 'x')}.png`)
   }
 
-  const currentFont = selected?.font ?? ''
+  const currentFont = selected?.kind === 'text' ? selected.font : ''
 
   const loadAllFonts = async () => {
     setFontLoading(true)
@@ -232,11 +296,23 @@ export default function App() {
     setRatioKey(tpl.ratioKey)
     setGradient(tpl.gradient)
     setLayers(
-      tpl.layers.map((l) => ({
-        ...l,
-        id: newLayerId(),
-        bg: { ...l.bg, paddingX: bgX(l), paddingY: bgY(l) },
-      })),
+      tpl.layers.map((l) => {
+        // 兼容旧模板：缺失 kind 视为文字图层
+        const kind = (l as { kind?: CanvasLayer['kind'] }).kind ?? 'text'
+        if (kind === 'text') {
+          const tl = l as TextLayer
+          return {
+            ...tl,
+            id: newLayerId(),
+            kind: 'text' as const,
+            bg: { ...tl.bg, paddingX: bgX(tl), paddingY: bgY(tl) },
+          }
+        }
+        if (kind === 'shape') {
+          return { ...(l as ShapeLayer), id: newLayerId(), kind: 'shape' as const }
+        }
+        return { ...(l as ImageLayer), id: newLayerId(), kind: 'image' as const }
+      }),
     )
     setSelectedId(tpl.layers[0]?.id ?? null)
   }
@@ -264,6 +340,8 @@ export default function App() {
       URL.revokeObjectURL(objectUrlRef.current)
       objectUrlRef.current = null
     }
+    layerUrlsRef.current.forEach((u) => URL.revokeObjectURL(u))
+    layerUrlsRef.current = []
     setImg(null)
     setImgName('')
     const fresh = createDefaultLayer()
@@ -292,6 +370,16 @@ export default function App() {
         hidden
         onChange={(e) => {
           onFontFileImport(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
+      <input
+        ref={shapeImgRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          onLayerImageImport(e.target.files?.[0])
           e.target.value = ''
         }}
       />
@@ -405,24 +493,58 @@ export default function App() {
             <p className="hint">调低可隐约透出下方图片</p>
           </section>
 
-          {/* 文字图层 */}
+          {/* 图形 / 元素 */}
+          <section className="block">
+            <h2>图形 / 元素</h2>
+            <div className="shape-grid">
+              {SHAPE_ORDER.map((s) => (
+                <button
+                  key={s}
+                  className="shape-btn"
+                  title={`新增${SHAPE_META[s].label}`}
+                  onClick={() => addShape(s)}
+                >
+                  <span className="shape-icon">{SHAPE_META[s].icon}</span>
+                  <span className="shape-label">{SHAPE_META[s].label}</span>
+                </button>
+              ))}
+              <button
+                className="shape-btn"
+                title="导入本地图片作为元素"
+                onClick={() => shapeImgRef.current?.click()}
+              >
+                <span className="shape-icon">🖼</span>
+                <span className="shape-label">图片</span>
+              </button>
+            </div>
+            <p className="hint">新增图形或导入图片，在画布上拖拽移动、拖手柄调节大小</p>
+          </section>
+
+          {/* 图层 */}
           <section className="block">
             <div className="row-between">
-              <h2 style={{ margin: 0 }}>文字图层</h2>
+              <h2 style={{ margin: 0 }}>图层</h2>
               <button className="btn chip" onClick={addLayer}>
-                + 新增
+                + 文字
               </button>
             </div>
             <div className="layer-list">
               {layers.map((l, i) => (
                 <div
                   key={l.id}
-                  className={
-                    l.id === selectedId ? 'layer-item active' : 'layer-item'
-                  }
+                  className={l.id === selectedId ? 'layer-item active' : 'layer-item'}
                   onClick={() => setSelectedId(l.id)}
                 >
-                  <span className="layer-name">{l.text || '(空)'}</span>
+                  <span className="layer-kind">
+                    {l.kind === 'text' ? 'T' : l.kind === 'shape' ? SHAPE_META[l.shape].icon : '🖼'}
+                  </span>
+                  <span className="layer-name">
+                    {l.kind === 'text'
+                      ? l.text || '(空)'
+                      : l.kind === 'shape'
+                        ? SHAPE_META[l.shape].label
+                        : '图片'}
+                  </span>
                   <span className="layer-actions">
                     <button
                       className="btn chip"
@@ -441,12 +563,12 @@ export default function App() {
               ))}
             </div>
 
-            {selected && (
+            {selected?.kind === 'text' && (
               <>
                 <textarea
                   rows={2}
                   value={selected.text}
-                  placeholder="输入文字，回车可换行"
+                  placeholder="输入文字，回车可换行（也可双击画布上的文字直接编辑）"
                   onChange={(e) => patchLayer(selected.id, { text: e.target.value })}
                 />
 
@@ -809,6 +931,132 @@ export default function App() {
                 </StyleToggle>
               </>
             )}
+
+            {selected?.kind === 'shape' && (
+              <>
+                <div className="row-between">
+                  <label className="field-label">填充颜色</label>
+                  <input
+                    type="color"
+                    value={selected.fill}
+                    onChange={(e) => patchLayer(selected.id, { fill: e.target.value })}
+                  />
+                </div>
+                <SliderRow
+                  label={`不透明度 ${selected.opacity}%`}
+                  min={0}
+                  max={100}
+                  value={selected.opacity}
+                  onChange={(v) => patchLayer(selected.id, { opacity: v })}
+                />
+                <SliderRow
+                  label={`宽度 ${selected.wPct.toFixed(0)}`}
+                  min={2}
+                  max={120}
+                  value={selected.wPct}
+                  onChange={(v) =>
+                    patchLayer(selected.id, {
+                      wPct: v,
+                      hPct: SHAPE_META[selected.shape].lock ? v : selected.hPct,
+                    })
+                  }
+                />
+                <SliderRow
+                  label={`高度 ${selected.hPct.toFixed(0)}`}
+                  min={2}
+                  max={120}
+                  value={selected.hPct}
+                  disabled={SHAPE_META[selected.shape].lock}
+                  onChange={(v) => patchLayer(selected.id, { hPct: v })}
+                />
+                <SliderRow
+                  label={`旋转 ${selected.rotation.toFixed(0)}°`}
+                  min={-180}
+                  max={180}
+                  value={selected.rotation}
+                  onChange={(v) => patchLayer(selected.id, { rotation: v })}
+                />
+                <div className="row-between">
+                  <label className="field-label">位置</label>
+                  <button
+                    className="btn chip"
+                    onClick={() => patchLayer(selected.id, { x: 0.5, y: 0.5 })}
+                  >
+                    居中
+                  </button>
+                </div>
+                <StyleToggle
+                  label="描边"
+                  enabled={selected.stroke.enabled}
+                  onToggle={() =>
+                    patchLayer(selected.id, {
+                      stroke: { ...selected.stroke, enabled: !selected.stroke.enabled },
+                    })
+                  }
+                >
+                  <div className="color-field">
+                    <input
+                      type="color"
+                      value={selected.stroke.color}
+                      onChange={(e) =>
+                        patchLayer(selected.id, {
+                          stroke: { ...selected.stroke, color: e.target.value },
+                        })
+                      }
+                    />
+                    <span>颜色</span>
+                  </div>
+                  <SliderRow
+                    label={`宽度 ${selected.stroke.width.toFixed(1)}`}
+                    min={0.1}
+                    max={5}
+                    step={0.1}
+                    value={selected.stroke.width}
+                    onChange={(v) =>
+                      patchLayer(selected.id, { stroke: { ...selected.stroke, width: v } })
+                    }
+                  />
+                </StyleToggle>
+              </>
+            )}
+
+            {selected?.kind === 'image' && (
+              <>
+                <SliderRow
+                  label={`不透明度 ${selected.opacity}%`}
+                  min={0}
+                  max={100}
+                  value={selected.opacity}
+                  onChange={(v) => patchLayer(selected.id, { opacity: v })}
+                />
+                <SliderRow
+                  label={`宽度 ${selected.wPct.toFixed(0)}`}
+                  min={2}
+                  max={200}
+                  value={selected.wPct}
+                  onChange={(v) => {
+                    const ratio = selected.naturalHeight / selected.naturalWidth
+                    patchLayer(selected.id, { wPct: v, hPct: v * ratio })
+                  }}
+                />
+                <SliderRow
+                  label={`旋转 ${selected.rotation.toFixed(0)}°`}
+                  min={-180}
+                  max={180}
+                  value={selected.rotation}
+                  onChange={(v) => patchLayer(selected.id, { rotation: v })}
+                />
+                <div className="row-between">
+                  <label className="field-label">位置</label>
+                  <button
+                    className="btn chip"
+                    onClick={() => patchLayer(selected.id, { x: 0.5, y: 0.5 })}
+                  >
+                    居中
+                  </button>
+                </div>
+              </>
+            )}
           </section>
 
           {/* 模板管理 */}
@@ -928,6 +1176,7 @@ function SliderRow({
   max,
   step = 1,
   value,
+  disabled,
   onChange,
 }: {
   label: string
@@ -935,6 +1184,7 @@ function SliderRow({
   max: number
   step?: number
   value: number
+  disabled?: boolean
   onChange: (v: number) => void
 }) {
   return (
@@ -946,6 +1196,7 @@ function SliderRow({
         max={max}
         step={step}
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
       />
     </div>

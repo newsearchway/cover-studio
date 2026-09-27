@@ -1,5 +1,13 @@
 import { coverLayout, SPLIT } from './cover'
-import type { GradientCfg, ImgTransform, TextLayer } from './types'
+import { shapePathCommands, tracePath } from './shape'
+import type {
+  CanvasLayer,
+  GradientCfg,
+  ImageLayer,
+  ImgTransform,
+  ShapeLayer,
+  TextLayer,
+} from './types'
 
 interface RenderArgs {
   W: number
@@ -7,7 +15,7 @@ interface RenderArgs {
   img: HTMLImageElement
   tf: ImgTransform
   gradient: GradientCfg
-  layers: TextLayer[]
+  layers: CanvasLayer[]
 }
 
 const FONT_FALLBACK =
@@ -52,7 +60,15 @@ function roundRect(
 }
 
 /** 将当前封面按给定像素尺寸渲染到 canvas（用于高清导出） */
-export function renderCover({ W, H, img, tf, gradient, layers }: RenderArgs): HTMLCanvasElement {
+export function renderCover({
+  W,
+  H,
+  img,
+  tf,
+  gradient,
+  layers,
+  images,
+}: RenderArgs & { images: Map<string, HTMLImageElement> }): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = W
   canvas.height = H
@@ -88,13 +104,78 @@ export function renderCover({ W, H, img, tf, gradient, layers }: RenderArgs): HT
   // 合成到主 canvas
   ctx.drawImage(gradCanvas, 0, 0)
 
-  // 3) 逐个绘制文字图层
+  // 3) 逐个绘制图层（图形 / 图片 / 文字）
   for (const layer of layers) {
-    if (!layer.text.trim()) continue
-    drawTextLayer(ctx, layer, W, H)
+    if (layer.kind === 'shape') drawShapeLayer(ctx, layer, W, H)
+    else if (layer.kind === 'image') drawImageLayer(ctx, layer, W, H, images)
+    else if (layer.text.trim()) drawTextLayer(ctx, layer, W, H)
   }
 
   return canvas
+}
+
+/** 绘制图形元素（与预览 SVG 共用同一套路径指令） */
+function drawShapeLayer(
+  ctx: CanvasRenderingContext2D,
+  layer: ShapeLayer,
+  W: number,
+  H: number,
+) {
+  const wPx = (layer.wPct / 100) * W
+  const hPx = (layer.hPct / 100) * W
+  const cx = layer.x * W
+  const cy = layer.y * H
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.rotate((layer.rotation * Math.PI) / 180)
+  ctx.globalAlpha = layer.opacity / 100
+
+  const ox = -wPx / 2
+  const oy = -hPx / 2
+  const cmds = shapePathCommands(layer.shape, wPx, hPx)
+  ctx.save()
+  ctx.translate(ox, oy)
+  if (cmds) {
+    tracePath(ctx, cmds)
+  } else if (layer.shape === 'rect' || layer.shape === 'square') {
+    ctx.beginPath()
+    ctx.rect(0, 0, wPx, hPx)
+  } else {
+    // circle / ellipse
+    ctx.beginPath()
+    ctx.ellipse(wPx / 2, hPx / 2, wPx / 2, hPx / 2, 0, 0, Math.PI * 2)
+  }
+  ctx.fillStyle = layer.fill
+  ctx.fill()
+  if (layer.stroke.enabled) {
+    ctx.globalAlpha = 1
+    ctx.strokeStyle = layer.stroke.color
+    ctx.lineWidth = (layer.stroke.width / 100) * W
+    ctx.lineJoin = 'round'
+    ctx.stroke()
+  }
+  ctx.restore()
+  ctx.restore()
+}
+
+/** 绘制图片元素 */
+function drawImageLayer(
+  ctx: CanvasRenderingContext2D,
+  layer: ImageLayer,
+  W: number,
+  H: number,
+  images: Map<string, HTMLImageElement>,
+) {
+  const img = images.get(layer.src)
+  if (!img || !img.complete || img.naturalWidth === 0) return
+  const wPx = (layer.wPct / 100) * W
+  const hPx = (layer.hPct / 100) * W
+  ctx.save()
+  ctx.translate(layer.x * W, layer.y * H)
+  ctx.rotate((layer.rotation * Math.PI) / 180)
+  ctx.globalAlpha = layer.opacity / 100
+  ctx.drawImage(img, -wPx / 2, -hPx / 2, wPx, hPx)
+  ctx.restore()
 }
 
 function drawTextLayer(

@@ -9,6 +9,7 @@ const uid = newLayerId
 export function createDefaultLayer(partial?: Partial<TextLayer>): TextLayer {
   return {
     id: uid(),
+    kind: 'text',
     text: '在这里输入标题',
     font: 'PingFang SC',
     sizePct: 7,

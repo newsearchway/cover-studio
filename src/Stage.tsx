@@ -1,16 +1,25 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { coverLayout, RATIO_SIZE, SPLIT, zoomAt } from './cover'
-import type { GradientCfg, ImgTransform, RatioKey, TextLayer } from './types'
+import { SHAPE_META, shapePathCommands, pathToSvgD } from './shape'
+import type {
+  CanvasLayer,
+  GradientCfg,
+  ImageLayer,
+  ImgTransform,
+  RatioKey,
+  ShapeLayer,
+  TextLayer,
+} from './types'
 
 interface StageProps {
   ratioKey: RatioKey
   img: HTMLImageElement | null
   tf: ImgTransform
   gradient: GradientCfg
-  layers: TextLayer[]
+  layers: CanvasLayer[]
   selectedId: string | null
   onImgTransform: (tf: ImgTransform) => void
-  onLayerChange: (id: string, patch: Partial<TextLayer>) => void
+  onLayerChange: (id: string, patch: Partial<CanvasLayer>) => void
   onSelectLayer: (id: string | null) => void
   onRequestUpload: () => void
 }
@@ -110,7 +119,7 @@ export default function Stage(props: StageProps) {
   // 拖动时的居中吸附提示
   const [guide, setGuide] = useState<{ x: boolean; y: boolean } | null>(null)
   const CENTER_THRESHOLD = 0.012
-  const onLayerPointerDown = (e: React.PointerEvent, layer: TextLayer) => {
+  const onLayerPointerDown = (e: React.PointerEvent, layer: CanvasLayer) => {
     e.stopPropagation()
     props.onSelectLayer(layer.id)
     try {
@@ -188,22 +197,26 @@ export default function Stage(props: StageProps) {
             />
           )}
 
-          {/* 文字图层 */}
-          {layers.map((layer) =>
-            layer.text.trim() ? (
-              <LayerView
-                key={layer.id}
-                layer={layer}
-                sw={sw}
-                sh={sh}
-                selected={layer.id === selectedId}
-                onPointerDown={(e) => onLayerPointerDown(e, layer)}
-                onPointerMove={onLayerPointerMove}
-                onPointerUp={onLayerPointerUp}
-                onLayerChange={props.onLayerChange}
-              />
-            ) : null,
-          )}
+          {/* 全部图层（文字 / 图形 / 图片） */}
+          {layers.map((layer) => {
+            const common = {
+              sw,
+              sh,
+              selected: layer.id === selectedId,
+              onPointerDown: (e: React.PointerEvent) => onLayerPointerDown(e, layer),
+              onPointerMove: onLayerPointerMove,
+              onPointerUp: onLayerPointerUp,
+              onLayerChange: props.onLayerChange,
+            }
+            if (layer.kind === 'text') {
+              if (!layer.text.trim()) return null
+              return <LayerView key={layer.id} layer={layer} {...common} />
+            }
+            if (layer.kind === 'shape') {
+              return <ShapeView key={layer.id} layer={layer} {...common} />
+            }
+            return <ImageView key={layer.id} layer={layer} {...common} />
+          })}
 
           {/* 拖动时居中参考线 */}
           {guide && (guide.x || guide.y) && (
@@ -244,7 +257,7 @@ interface LayerViewProps {
   onPointerDown: (e: React.PointerEvent) => void
   onPointerMove: (e: React.PointerEvent) => void
   onPointerUp: (e: React.PointerEvent) => void
-  onLayerChange: (id: string, patch: Partial<TextLayer>) => void
+  onLayerChange: (id: string, patch: Partial<CanvasLayer>) => void
 }
 
 function LayerView({
@@ -258,6 +271,9 @@ function LayerView({
   onLayerChange,
 }: LayerViewProps) {
   const fs = (layer.sizePct / 100) * sw
+  // 双击行内编辑状态
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(layer.text)
   // 拖拽缩放手柄状态：向右/向下拖增大字号
   const resizing = useRef<{ startX: number; startY: number; startSize: number } | null>(null)
   const onResizeDown = (e: React.PointerEvent) => {
@@ -325,6 +341,67 @@ function LayerView({
     zIndex: selected ? 10 : 3,
   }
 
+  // —— 双击行内编辑：覆盖在文字位置的多行编辑器 ——
+  if (editing) {
+    const commit = () => {
+      onLayerChange(layer.id, { text: draft })
+      setEditing(false)
+    }
+    return (
+      <div
+        className="inline-editor"
+        style={{
+          position: 'absolute',
+          left: layer.x * sw,
+          top: layer.y * sh,
+          transform: `translate(-50%, -50%) rotate(${layer.rotation}deg)`,
+          zIndex: 50,
+        }}
+      >
+        <textarea
+          autoFocus
+          value={draft}
+          rows={Math.max(1, draft.split('\n').length)}
+          onChange={(e) => setDraft(e.target.value)}
+          onPointerDown={(e) => e.stopPropagation()}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              setDraft(layer.text)
+              setEditing(false)
+            } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault()
+              commit()
+            }
+          }}
+          style={{
+            fontFamily: `"${layer.font}", "PingFang SC", sans-serif`,
+            fontSize: fs,
+            color: layer.color,
+            fontWeight: layer.bold ? 700 : 500,
+            textAlign: layer.align,
+            lineHeight: 1.3,
+            background: 'rgba(20,22,30,0.92)',
+            border: '2px solid #6366f1',
+            borderRadius: 6,
+            outline: 'none',
+            resize: 'none',
+            padding: 4,
+            whiteSpace: 'pre',
+            overflow: 'hidden',
+            minWidth: fs * 2,
+          }}
+        />
+      </div>
+    )
+  }
+
+  const startEdit = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setDraft(layer.text)
+    setEditing(true)
+  }
+
   // —— 弯曲排列：SVG textPath ——
   if (layer.layout === 'curved') {
     const r = (layer.curveRadius / 100) * sw
@@ -351,6 +428,7 @@ function LayerView({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onDoubleClick={startEdit}
       >
         <svg width={Ws} height={Hs} style={{ overflow: 'visible', display: 'block' }}>
           <defs>
@@ -388,6 +466,7 @@ function LayerView({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onDoubleClick={startEdit}
       >
         <div
           style={{
@@ -439,6 +518,7 @@ function LayerView({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onDoubleClick={startEdit}
     >
       <span className="stage-title-inner" style={innerStyle}>
         {layer.text}
@@ -465,5 +545,240 @@ function ResizeHandle({
       onPointerUp={onUp}
       title="拖拽调整字号"
     />
+  )
+}
+
+/* ================= 图形 / 图片元素视图 ================= */
+
+interface BoxViewProps {
+  sw: number
+  sh: number
+  selected: boolean
+  onPointerDown: (e: React.PointerEvent) => void
+  onPointerMove: (e: React.PointerEvent) => void
+  onPointerUp: (e: React.PointerEvent) => void
+  onLayerChange: (id: string, patch: Partial<CanvasLayer>) => void
+}
+
+function ShapeView({
+  layer,
+  sw,
+  sh,
+  selected,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onLayerChange,
+}: BoxViewProps & { layer: ShapeLayer }) {
+  const wPx = (layer.wPct / 100) * sw
+  const hPx = (layer.hPct / 100) * sw
+  const cmds = shapePathCommands(layer.shape, wPx, hPx)
+  const strokeW = layer.stroke.enabled ? (layer.stroke.width / 100) * sw : 0
+
+  let shapeEl: React.ReactNode = null
+  if (cmds) {
+    shapeEl = (
+      <path
+        d={pathToSvgD(cmds)}
+        fill={layer.fill}
+        fillOpacity={layer.opacity / 100}
+        stroke={layer.stroke.enabled ? layer.stroke.color : 'none'}
+        strokeWidth={strokeW}
+        strokeLinejoin="round"
+      />
+    )
+  } else if (layer.shape === 'rect' || layer.shape === 'square') {
+    shapeEl = (
+      <rect
+        x={strokeW / 2}
+        y={strokeW / 2}
+        width={Math.max(0, wPx - strokeW)}
+        height={Math.max(0, hPx - strokeW)}
+        fill={layer.fill}
+        fillOpacity={layer.opacity / 100}
+        stroke={layer.stroke.enabled ? layer.stroke.color : 'none'}
+        strokeWidth={strokeW}
+      />
+    )
+  } else {
+    // circle / ellipse
+    shapeEl = (
+      <ellipse
+        cx={wPx / 2}
+        cy={hPx / 2}
+        rx={Math.max(0, wPx / 2 - strokeW / 2)}
+        ry={Math.max(0, hPx / 2 - strokeW / 2)}
+        fill={layer.fill}
+        fillOpacity={layer.opacity / 100}
+        stroke={layer.stroke.enabled ? layer.stroke.color : 'none'}
+        strokeWidth={strokeW}
+      />
+    )
+  }
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: layer.x * sw,
+        top: layer.y * sh,
+        width: wPx,
+        height: hPx,
+        transform: `translate(-50%, -50%) rotate(${layer.rotation}deg)`,
+        cursor: 'move',
+        touchAction: 'none',
+        outline: selected ? '2px dashed #6366f1' : 'none',
+        outlineOffset: 4,
+        zIndex: selected ? 10 : 3,
+      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+    >
+      <svg width={wPx} height={hPx} style={{ display: 'block', overflow: 'visible' }}>
+        {shapeEl}
+      </svg>
+      {selected && (
+        <ResizeBox
+          layer={layer}
+          sw={sw}
+          onLayerChange={onLayerChange}
+          keepAspect={SHAPE_META[layer.shape].lock}
+        />
+      )}
+    </div>
+  )
+}
+
+function ImageView({
+  layer,
+  sw,
+  sh,
+  selected,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onLayerChange,
+}: BoxViewProps & { layer: ImageLayer }) {
+  const wPx = (layer.wPct / 100) * sw
+  const hPx = (layer.hPct / 100) * sw
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: layer.x * sw,
+        top: layer.y * sh,
+        width: wPx,
+        height: hPx,
+        transform: `translate(-50%, -50%) rotate(${layer.rotation}deg)`,
+        cursor: 'move',
+        touchAction: 'none',
+        outline: selected ? '2px dashed #6366f1' : 'none',
+        outlineOffset: 4,
+        zIndex: selected ? 10 : 3,
+      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+    >
+      <img
+        src={layer.src}
+        alt=""
+        draggable={false}
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'block',
+          opacity: layer.opacity / 100,
+          pointerEvents: 'none',
+          objectFit: 'fill',
+        }}
+      />
+      {selected && (
+        <ResizeBox layer={layer} sw={sw} onLayerChange={onLayerChange} keepAspect />
+      )}
+    </div>
+  )
+}
+
+/** 8 向缩放手柄：拖动边缘/角点调节元素宽高（以中心为锚点对称缩放） */
+function ResizeBox({
+  layer,
+  sw,
+  onLayerChange,
+  keepAspect,
+}: {
+  layer: ShapeLayer | ImageLayer
+  sw: number
+  onLayerChange: (id: string, patch: Partial<CanvasLayer>) => void
+  keepAspect: boolean
+}) {
+  const drag = useRef<{ sx: number; sy: number; w: number; h: number } | null>(null)
+
+  const onDown = (dir: string) => (e: React.PointerEvent) => {
+    e.stopPropagation()
+    try {
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    } catch {
+      /* ignore */
+    }
+    drag.current = { sx: e.clientX, sy: e.clientY, w: layer.wPct, h: layer.hPct }
+    ;(e.currentTarget as HTMLElement).setAttribute('data-dir', dir)
+  }
+  const onMove = (e: React.PointerEvent) => {
+    const d = drag.current
+    if (!d) return
+    const dir = (e.currentTarget as HTMLElement).getAttribute('data-dir') || ''
+    const dx = e.clientX - d.sx
+    const dy = e.clientY - d.sy
+    let dw = 0
+    let dh = 0
+    if (dir.includes('e')) dw += dx
+    if (dir.includes('w')) dw -= dx
+    if (dir.includes('s')) dh += dy
+    if (dir.includes('n')) dh -= dy
+    const perPx = 100 / sw
+    const pw = Math.max(2, d.w + 2 * dw * perPx)
+    const ph = Math.max(2, d.h + 2 * dh * perPx)
+    if (keepAspect) {
+      const kw = pw / d.w
+      const kh = ph / d.h
+      const scale = Math.max(0.05, Math.abs(kw - 1) >= Math.abs(kh - 1) ? kw : kh)
+      onLayerChange(layer.id, { wPct: Math.round(d.w * scale * 10) / 10, hPct: Math.round(d.h * scale * 10) / 10 })
+    } else {
+      onLayerChange(layer.id, { wPct: Math.round(pw * 10) / 10, hPct: Math.round(ph * 10) / 10 })
+    }
+  }
+  const onUp = (e: React.PointerEvent) => {
+    drag.current = null
+    try {
+      ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const handle = (dir: string, style: React.CSSProperties, cursor: string) => (
+    <div
+      key={dir}
+      className="rz-handle"
+      style={{ ...style, cursor }}
+      onPointerDown={onDown(dir)}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+    />
+  )
+  const H = 10
+  return (
+    <>
+      {handle('nw', { left: -H / 2, top: -H / 2 }, 'nwse-resize')}
+      {handle('n', { left: '50%', top: -H / 2, transform: 'translateX(-50%)' }, 'ns-resize')}
+      {handle('ne', { right: -H / 2, top: -H / 2 }, 'nesw-resize')}
+      {handle('e', { right: -H / 2, top: '50%', transform: 'translateY(-50%)' }, 'ew-resize')}
+      {handle('se', { right: -H / 2, bottom: -H / 2 }, 'nwse-resize')}
+      {handle('s', { left: '50%', bottom: -H / 2, transform: 'translateX(-50%)' }, 'ns-resize')}
+      {handle('sw', { left: -H / 2, bottom: -H / 2 }, 'nesw-resize')}
+      {handle('w', { left: -H / 2, top: '50%', transform: 'translateY(-50%)' }, 'ew-resize')}
+    </>
   )
 }

@@ -52,8 +52,25 @@ export interface TitleShadow {
 /** 文字排列方式 */
 export type TextLayout = 'horizontal' | 'vertical' | 'slanted' | 'curved'
 
-export interface TextLayer {
+/** 画布图层种类：文字 / 图形 / 图片元素 */
+export type LayerKind = 'text' | 'shape' | 'image'
+
+/** 图形种类 */
+export type ShapeKind = 'rect' | 'square' | 'circle' | 'ellipse' | 'triangle' | 'star' | 'heart'
+
+/** 图层公共字段：锚点（中心）归一化坐标 + 旋转 */
+export interface BaseLayer {
   id: string
+  kind: LayerKind
+  /** 锚点（中心）在画布中的归一化坐标 0-1 */
+  x: number
+  y: number
+  /** 整体旋转角度（度） */
+  rotation: number
+}
+
+export interface TextLayer extends BaseLayer {
+  kind: 'text'
   text: string
   /** 字体族（系统字库） */
   font: string
@@ -82,6 +99,45 @@ export interface TextLayer {
   stroke: TitleStroke
   shadow: TitleShadow
 }
+
+/** 图形描边 */
+export interface ShapeStroke {
+  enabled: boolean
+  color: string
+  /** 描边宽度（占画布宽度的百分比） */
+  width: number
+}
+
+/** 图形图层：方形、圆形、星形、心形等常规图形 */
+export interface ShapeLayer extends BaseLayer {
+  kind: 'shape'
+  shape: ShapeKind
+  /** 宽度（占画布宽度的百分比） */
+  wPct: number
+  /** 高度（占画布宽度的百分比，与宽度同基数保证等比） */
+  hPct: number
+  fill: string
+  /** 填充不透明度 0-100 */
+  opacity: number
+  stroke: ShapeStroke
+}
+
+/** 图片元素图层：导入的本地图片作为可缩放/拖动的独立元素 */
+export interface ImageLayer extends BaseLayer {
+  kind: 'image'
+  src: string
+  /** 宽度（占画布宽度的百分比） */
+  wPct: number
+  /** 高度（占画布宽度的百分比） */
+  hPct: number
+  /** 不透明度 0-100 */
+  opacity: number
+  naturalWidth: number
+  naturalHeight: number
+}
+
+/** 画布上的全部图层（文字 / 图形 / 图片） */
+export type CanvasLayer = TextLayer | ShapeLayer | ImageLayer
 
 /** 常见系统字库（中+英），可被自定义字体覆盖 */
 export const SYSTEM_FONTS: string[] = [
