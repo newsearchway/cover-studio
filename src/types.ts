@@ -56,7 +56,18 @@ export type TextLayout = 'horizontal' | 'vertical' | 'slanted' | 'curved'
 export type LayerKind = 'text' | 'shape' | 'image'
 
 /** 图形种类 */
-export type ShapeKind = 'rect' | 'square' | 'circle' | 'ellipse' | 'triangle' | 'star' | 'heart'
+export type ShapeKind =
+  | 'rect'
+  | 'square'
+  | 'circle'
+  | 'ellipse'
+  | 'triangle'
+  | 'star'
+  | 'heart'
+  | 'arrow'
+  | 'bubble'
+  | 'moon'
+  | 'ribbon'
 
 /** 图层公共字段：锚点（中心）归一化坐标 + 旋转 */
 export interface BaseLayer {

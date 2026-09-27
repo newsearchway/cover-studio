@@ -176,6 +176,18 @@ export default function App() {
     setSelectedId(nl.id)
   }
 
+  // 调整图层上下层级：dir=+1 上移（置前，数组靠后=渲染在上方），-1 下移（置后）
+  const moveLayer = (id: string, dir: -1 | 1) => {
+    setLayers((ls) => {
+      const i = ls.findIndex((l) => l.id === id)
+      const j = i + dir
+      if (i < 0 || j < 0 || j >= ls.length) return ls
+      const next = [...ls]
+      ;[next[i], next[j]] = [next[j], next[i]]
+      return next
+    })
+  }
+
   // 导入本地图片作为独立元素图层
   const onLayerImageImport = (file?: File) => {
     if (!file) return
@@ -548,6 +560,28 @@ export default function App() {
                   <span className="layer-actions">
                     <button
                       className="btn chip"
+                      disabled={i === layers.length - 1}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        moveLayer(l.id, 1)
+                      }}
+                      title="上移一层（置于更上层）"
+                    >
+                      ▲
+                    </button>
+                    <button
+                      className="btn chip"
+                      disabled={i === 0}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        moveLayer(l.id, -1)
+                      }}
+                      title="下移一层（置于更下层）"
+                    >
+                      ▼
+                    </button>
+                    <button
+                      className="btn chip"
                       disabled={layers.length <= 1}
                       onClick={(e) => {
                         e.stopPropagation()
@@ -562,6 +596,9 @@ export default function App() {
                 </div>
               ))}
             </div>
+            <p className="hint">
+              ▲ 上移 / ▼ 下移 调整图层上下层关系（越靠后越在最上层，如让文字显示在图形上方），× 删除图层
+            </p>
 
             {selected?.kind === 'text' && (
               <>

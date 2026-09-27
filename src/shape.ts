@@ -1,7 +1,7 @@
 import type { ImageLayer, ShapeKind, ShapeLayer } from './types'
 import { newLayerId } from './textLayer'
 
-/** 图形元数据：名称、是否锁定宽高比（圆/方/星/心/三角锁定，矩形/椭圆可自由拉伸） */
+/** 图形元数据：名称、是否锁定宽高比、按钮图标 */
 export const SHAPE_META: Record<ShapeKind, { label: string; lock: boolean; icon: string }> = {
   rect: { label: '矩形', lock: false, icon: '▭' },
   square: { label: '方形', lock: true, icon: '◻' },
@@ -10,9 +10,28 @@ export const SHAPE_META: Record<ShapeKind, { label: string; lock: boolean; icon:
   triangle: { label: '三角', lock: true, icon: '▲' },
   star: { label: '星形', lock: true, icon: '★' },
   heart: { label: '心形', lock: true, icon: '♥' },
+  arrow: { label: '箭头', lock: true, icon: '➤' },
+  bubble: { label: '对话框', lock: false, icon: '💬' },
+  moon: { label: '弯月', lock: true, icon: '☾' },
+  ribbon: { label: '丝带', lock: false, icon: '🎗' },
 }
 
-export const SHAPE_ORDER: ShapeKind[] = ['rect', 'square', 'ellipse', 'circle', 'triangle', 'star', 'heart']
+export const SHAPE_ORDER: ShapeKind[] = [
+  'rect',
+  'square',
+  'ellipse',
+  'circle',
+  'triangle',
+  'star',
+  'heart',
+  'arrow',
+  'bubble',
+  'moon',
+  'ribbon',
+]
+
+/** 需要 evenodd 填充规则的图形（弯月由两个圆相减得到） */
+export const SHAPE_EVENODD: Set<ShapeKind> = new Set<ShapeKind>(['moon'])
 
 /** 新建图形图层（默认居中、尺寸为画布宽 30%） */
 export function createDefaultShape(shape: ShapeKind, partial?: Partial<ShapeLayer>): ShapeLayer {
@@ -114,7 +133,95 @@ function heartPath(w: number, h: number): PathCmd[] {
   ]
 }
 
-/** 生成图形的路径指令（三角形/星形/心形）；rect/circle/ellipse 由调用方用原语绘制 */
+/** 用 4 段三次贝塞尔近似整圆（k=0.5522847），原点在左上角的 w×h 盒内 */
+function circlePath(cx: number, cy: number, r: number): PathCmd[] {
+  const k = 0.5522847 * r
+  return [
+    { t: 'M', x: cx + r, y: cy },
+    { t: 'C', x1: cx + r, y1: cy + k, x2: cx + k, y2: cy + r, x: cx, y: cy + r },
+    { t: 'C', x1: cx - k, y1: cy + r, x2: cx - r, y2: cy + k, x: cx - r, y: cy },
+    { t: 'C', x1: cx - r, y1: cy - k, x2: cx - k, y2: cy - r, x: cx, y: cy - r },
+    { t: 'C', x1: cx + k, y1: cy - r, x2: cx + r, y2: cy - k, x: cx + r, y: cy },
+    { t: 'Z' },
+  ]
+}
+
+/** 圆角矩形路径（用单段三次贝塞尔近似每个角），原点在左上角 */
+function roundRectPath(x: number, y: number, w: number, h: number, r: number): PathCmd[] {
+  const rr = Math.min(r, w / 2, h / 2)
+  return [
+    { t: 'M', x: x + rr, y },
+    { t: 'L', x: x + w - rr, y },
+    { t: 'C', x1: x + w, y1: y, x2: x + w, y2: y, x: x + w, y: y + rr },
+    { t: 'L', x: x + w, y: y + h - rr },
+    { t: 'C', x1: x + w, y1: y + h, x2: x + w, y2: y + h, x: x + w - rr, y: y + h },
+    { t: 'L', x: x + rr, y: y + h },
+    { t: 'C', x1: x, y1: y + h, x2: x, y2: y + h, x, y: y + h - rr },
+    { t: 'L', x, y: y + rr },
+    { t: 'C', x1: x, y1: y, x2: x, y2: y, x: x + rr, y },
+    { t: 'Z' },
+  ]
+}
+
+/** 箭头（朝右）：杆 + 三角箭头帽，在 w×h 盒内居中 */
+function arrowPath(w: number, h: number): PathCmd[] {
+  const shaftR = h * 0.16 // 杆半高
+  const headX = w * 0.62 // 箭头帽起点
+  const cy = h / 2
+  return [
+    { t: 'M', x: 0, y: cy - shaftR },
+    { t: 'L', x: headX, y: cy - shaftR },
+    { t: 'L', x: headX, y: 0 },
+    { t: 'L', x: w, y: cy },
+    { t: 'L', x: headX, y: h },
+    { t: 'L', x: headX, y: cy + shaftR },
+    { t: 'L', x: 0, y: cy + shaftR },
+    { t: 'Z' },
+  ]
+}
+
+/** 对话框：圆角矩形主体 + 左下角三角尾巴（两个子路径） */
+function bubblePath(w: number, h: number): PathCmd[] {
+  const r = Math.min(w, h) * 0.1
+  const bodyH = h * 0.8
+  const cmds: PathCmd[] = roundRectPath(0, 0, w, bodyH, r)
+  // 左下角三角尾巴
+  cmds.push(
+    { t: 'M', x: w * 0.22, y: bodyH },
+    { t: 'L', x: w * 0.1, y: h },
+    { t: 'L', x: w * 0.38, y: bodyH },
+    { t: 'Z' },
+  )
+  return cmds
+}
+
+/** 弯月：外圆减内圆（evenodd），两个圆子路径 */
+function moonPath(w: number, h: number): PathCmd[] {
+  const cx = w / 2
+  const cy = h / 2
+  const r = Math.min(w, h) * 0.46
+  const outer = circlePath(cx, cy, r)
+  // 内圆向右上偏移，挖出月牙
+  const inner = circlePath(cx + r * 0.42, cy - r * 0.28, r * 0.86)
+  return [...outer, ...inner]
+}
+
+/** 丝带/横幅：矩形右侧带三角燕尾 */
+function ribbonPath(w: number, h: number): PathCmd[] {
+  const fork = w * 0.2
+  return [
+    { t: 'M', x: 0, y: h * 0.22 },
+    { t: 'L', x: w - fork, y: h * 0.22 },
+    { t: 'L', x: w - fork, y: 0 },
+    { t: 'L', x: w, y: h * 0.5 },
+    { t: 'L', x: w - fork, y: h },
+    { t: 'L', x: w - fork, y: h * 0.78 },
+    { t: 'L', x: 0, y: h * 0.78 },
+    { t: 'Z' },
+  ]
+}
+
+/** 生成图形的路径指令（三角形/星形/心形/箭头/对话框/弯月/丝带）；rect/circle/ellipse 由调用方用原语绘制 */
 export function shapePathCommands(kind: ShapeKind, w: number, h: number): PathCmd[] | null {
   if (kind === 'triangle' || kind === 'star') {
     const pts = polygonPoints(kind, w, h)
@@ -126,6 +233,10 @@ export function shapePathCommands(kind: ShapeKind, w: number, h: number): PathCm
     return cmds
   }
   if (kind === 'heart') return heartPath(w, h)
+  if (kind === 'arrow') return arrowPath(w, h)
+  if (kind === 'bubble') return bubblePath(w, h)
+  if (kind === 'moon') return moonPath(w, h)
+  if (kind === 'ribbon') return ribbonPath(w, h)
   return null
 }
 

@@ -1,5 +1,5 @@
 import { coverLayout, SPLIT } from './cover'
-import { shapePathCommands, tracePath } from './shape'
+import { shapePathCommands, SHAPE_EVENODD, tracePath } from './shape'
 import type {
   CanvasLayer,
   GradientCfg,
@@ -146,7 +146,8 @@ function drawShapeLayer(
     ctx.ellipse(wPx / 2, hPx / 2, wPx / 2, hPx / 2, 0, 0, Math.PI * 2)
   }
   ctx.fillStyle = layer.fill
-  ctx.fill()
+  const fillRule = SHAPE_EVENODD.has(layer.shape) ? 'evenodd' : undefined
+  ctx.fill(fillRule)
   if (layer.stroke.enabled) {
     ctx.globalAlpha = 1
     ctx.strokeStyle = layer.stroke.color

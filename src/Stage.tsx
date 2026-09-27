@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { coverLayout, RATIO_SIZE, SPLIT, zoomAt } from './cover'
-import { SHAPE_META, shapePathCommands, pathToSvgD } from './shape'
+import { SHAPE_EVENODD, SHAPE_META, shapePathCommands, pathToSvgD } from './shape'
 import type {
   CanvasLayer,
   GradientCfg,
@@ -197,11 +197,12 @@ export default function Stage(props: StageProps) {
             />
           )}
 
-          {/* 全部图层（文字 / 图形 / 图片） */}
-          {layers.map((layer) => {
+          {/* 全部图层（文字 / 图形 / 图片），数组越靠后越在顶层 */}
+          {layers.map((layer, index) => {
             const common = {
               sw,
               sh,
+              order: index,
               selected: layer.id === selectedId,
               onPointerDown: (e: React.PointerEvent) => onLayerPointerDown(e, layer),
               onPointerMove: onLayerPointerMove,
@@ -253,6 +254,7 @@ interface LayerViewProps {
   layer: TextLayer
   sw: number
   sh: number
+  order: number
   selected: boolean
   onPointerDown: (e: React.PointerEvent) => void
   onPointerMove: (e: React.PointerEvent) => void
@@ -264,6 +266,7 @@ function LayerView({
   layer,
   sw,
   sh,
+  order,
   selected,
   onPointerDown,
   onPointerMove,
@@ -338,7 +341,7 @@ function LayerView({
     touchAction: 'none',
     outline: selected ? '2px dashed #6366f1' : 'none',
     outlineOffset: 4,
-    zIndex: selected ? 10 : 3,
+    zIndex: selected ? 1000 + order : order,
   }
 
   // —— 双击行内编辑：覆盖在文字位置的多行编辑器 ——
@@ -553,6 +556,7 @@ function ResizeHandle({
 interface BoxViewProps {
   sw: number
   sh: number
+  order: number
   selected: boolean
   onPointerDown: (e: React.PointerEvent) => void
   onPointerMove: (e: React.PointerEvent) => void
@@ -564,6 +568,7 @@ function ShapeView({
   layer,
   sw,
   sh,
+  order,
   selected,
   onPointerDown,
   onPointerMove,
@@ -582,6 +587,7 @@ function ShapeView({
         d={pathToSvgD(cmds)}
         fill={layer.fill}
         fillOpacity={layer.opacity / 100}
+        fillRule={SHAPE_EVENODD.has(layer.shape) ? 'evenodd' : undefined}
         stroke={layer.stroke.enabled ? layer.stroke.color : 'none'}
         strokeWidth={strokeW}
         strokeLinejoin="round"
@@ -629,7 +635,7 @@ function ShapeView({
         touchAction: 'none',
         outline: selected ? '2px dashed #6366f1' : 'none',
         outlineOffset: 4,
-        zIndex: selected ? 10 : 3,
+        zIndex: selected ? 1000 + order : order,
       }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -654,6 +660,7 @@ function ImageView({
   layer,
   sw,
   sh,
+  order,
   selected,
   onPointerDown,
   onPointerMove,
@@ -675,7 +682,7 @@ function ImageView({
         touchAction: 'none',
         outline: selected ? '2px dashed #6366f1' : 'none',
         outlineOffset: 4,
-        zIndex: selected ? 10 : 3,
+        zIndex: selected ? 1000 + order : order,
       }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

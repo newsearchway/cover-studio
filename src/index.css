@@ -418,6 +418,12 @@ input[type='range'] {
   text-align: right;
 }
 
+.layer-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
 .layer-actions .btn.chip {
   min-width: 24px;
   padding: 2px 8px;
